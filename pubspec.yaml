@@ -1,0 +1,58 @@
+name: isan_flutter
+description: ISAN - Aplikasi streaming anime, film, series, dan musik.
+publish_to: 'none'
+version: 1.4.34+35
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_secure_storage: ^9.2.2
+  package_info_plus: ^8.1.2
+  firebase_core: ^3.8.0
+  firebase_messaging: ^15.1.5
+  http: ^1.2.2
+  shared_preferences: ^2.3.2
+  video_player: ^2.9.2
+  webview_flutter: ^4.10.0
+  # Dipakai langsung di anime/anime_episode/music_webview (WebViewController
+  # platform-specific). Sebelumnya cuma ikut lewat webview_flutter, sehingga
+  # analyzer menandai 'depend_on_referenced_packages'.
+  webview_flutter_android: ^4.3.0
+  # Dipakai langsung di lib/state/device_id.dart untuk membuat device ID.
+  uuid: ^4.5.1
+  url_launcher: ^6.3.1
+  flutter_svg: ^2.0.10+1
+  cached_network_image: ^3.4.1
+  provider: ^6.1.2
+  google_fonts: ^6.2.1
+  # dipakai untuk SSL pinning (SHA-256 sertifikat) di lib/api/api_client.dart
+  crypto: ^3.0.6
+  webview_cef: ^0.6.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/
+    - assets/images/banners/
+    - assets/video/
+    - assets/fonts/
+
+  # ── Font DejaVu Sans dibundel sendiri ──────────────────────────
+  # HP (mt6765, Android 10) TIDAK punya DejaVuSans.ttf, dan
+  # 'DejaVu Sans' juga tidak terdaftar di sini sebelumnya. Akibatnya
+  # Flutter memakai font CADANGAN sistem — yang bisa jadi
+  # NotoColorEmoji (font BERWARNA). Itu sumber warna KUNING
+  # RGB(255,255,0) pada huruf logo (terbukti dari pemindaian piksel).
+  # Dengan font dibundel sendiri, huruf dijamin memakai font ini.
+  fonts:
+    - family: DejaVu Sans
+      fonts:
+        - asset: assets/fonts/DejaVuSans-Bold.ttf
+          weight: 700
