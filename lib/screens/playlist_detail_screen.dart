@@ -3,25 +3,24 @@ import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../api/api_client.dart';
 import '../models/song.dart';
+import '../state/local_playlist_service.dart';
 import '../state/music_player_state.dart';
 import '../theme.dart';
 import '../widgets/app_background.dart';
 import '../widgets/music_card.dart';
 import '../responsive.dart';
 
-/// Detail playlist — diambil LANGSUNG dari API (GET /api/playlist/:id →
-/// { playlist: { ..., songs: [...] } }) dan dirender native sebagai LIST
-/// PANJANG (bukan grid kotak) pakai MusicCard layout list. Tap baris =
-/// play langsung lewat MusicPlayerState (mini player di bawah). Tombol
-/// minus di tiap baris buat hapus lagu dari playlist ini.
-///
-/// PERUBAHAN: header sekarang lebih detail — cover 2x2 grid besar (160x160),
-/// nama playlist, username, jumlah lagu, total durasi, dan tombol Putar Semua
-/// + Shuffle.
 class PlaylistDetailScreen extends StatefulWidget {
   final String id;
   final String title;
-  const PlaylistDetailScreen({super.key, required this.id, this.title = 'Playlist'});
+  final List<Song>? localSongs;
+
+  const PlaylistDetailScreen({
+    super.key,
+    required this.id,
+    this.title = 'Playlist',
+    this.localSongs,
+  });
 
   @override
   State<PlaylistDetailScreen> createState() => _PlaylistDetailScreenState();
@@ -46,13 +45,34 @@ class _PlaylistDetailScreenState extends State<PlaylistDetailScreen> {
       _loading = true;
       _error = null;
     });
+
+    if (widget.id.startsWith('local_') || widget.localSongs != null) {
+      final list = await LocalPlaylistService.getPlaylists();
+      final current = list.firstWhere((e) => e['id'] == widget.id, orElse: () => {});
+      if (current.isNotEmpty) {
+        final songsRaw = (current['songs'] as List?) ?? [];
+        setState(() {
+          _name = (current['name'] ?? widget.title).toString();
+          _username = (current['username'] ?? 'Lokal').toString();
+          _songs = songsRaw.map((e) => Song.fromJson(Map<String, dynamic>.from(e))).toList();
+          _loading = false;
+        });
+        return;
+      } else if (widget.localSongs != null) {
+        setState(() {
+          _name = widget.title;
+          _username = 'Lokal';
+          _songs = widget.localSongs!;
+          _loading = false;
+        });
+        return;
+      }
+    }
+
     try {
       final d = await Api.playlistGetById(widget.id);
       if (d is Map && d['error'] != null) throw Exception(d['error']);
       final pl = Map<String, dynamic>.from(d['playlist'] ?? d);
-      // Backend mengirim lagu dengan kunci 'hasil'/'results'/'items'.
-      // Sebelumnya hanya 'songs' dibaca, sehingga playlist yang sudah
-      // berisi lagu tetap tampil kosong di aplikasi.
       final songsRaw = (pl['songs'] as List?)
           ?? (pl['hasil'] as List?)
           ?? (pl['results'] as List?)
@@ -107,10 +127,13 @@ class _PlaylistDetailScreenState extends State<PlaylistDetailScreen> {
     );
     if (confirm != true) return;
 
+    if (widget.id.startsWith('local_')) {
+      await LocalPlaylistService.removeSongFromPlaylist(widget.id, s.id.isNotEmpty ? s.id : s.videoId);
+      _load();
+      return;
+    }
+
     setState(() => _songs.removeWhere((x) => x.videoId == s.videoId));
-    // Backend menghapus dengan WHERE id = ? AND playlist_id = ?,
-    // jadi yang dikirim harus KOLOM id (angka), bukan videoId.
-    // Kalau id tidak ada (mis. balasan lama), baru pakai videoId.
     final d = await Api.playlistRemoveSong(widget.id, s.id.isNotEmpty ? s.id : s.videoId);
     if (d['error'] != null && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(d['error'].toString())));
@@ -132,192 +155,232 @@ class _PlaylistDetailScreenState extends State<PlaylistDetailScreen> {
     return AppBackground(
       image: AppBg.main,
       child: Scaffold(
-      backgroundColor: Colors.transparent,
-      body: RefreshIndicator(
-        color: AppColors.red,
-        backgroundColor: AppColors.surface,
-        onRefresh: _load,
-        child: _loading
-            ? const Center(child: CircularProgressIndicator(color: AppColors.red))
-            : _error != null
-                ? Center(child: Text(_error!, style: const TextStyle(color: AppColors.textMuted)))
-                : CustomScrollView(
-                    slivers: [
-                      // ── AppBar polos (banner besar dihapus) ──
-                      SliverAppBar(
-                        backgroundColor: Colors.transparent,
-                        pinned: true,
-                        elevation: 0,
-                        title: Text(
-                          _name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+        backgroundColor: Colors.transparent,
+        body: RefreshIndicator(
+          color: AppColors.red,
+          backgroundColor: AppColors.surface,
+          onRefresh: _load,
+          child: _loading
+              ? const Center(child: CircularProgressIndicator(color: AppColors.red))
+              : _error != null
+                  ? Center(child: Text(_error!, style: const TextStyle(color: AppColors.textMuted)))
+                  : CustomScrollView(
+                      slivers: [
+                        SliverAppBar(
+                          backgroundColor: Colors.transparent,
+                          pinned: true,
+                          elevation: 0,
+                          leading: IconButton(
+                            icon: const Icon(Icons.arrow_back, color: Colors.white),
+                            onPressed: () => Navigator.of(context).pop(),
+                          ),
                         ),
-                      ),
-
-                      // ── Info playlist ringkas (cover kecil + nama + jumlah lagu) ──
-                      SliverToBoxAdapter(
-                        child: _PlaylistCompactHeader(
-                          name: _name,
-                          username: _username,
-                          songs: _songs,
-                          totalDuration: _songs.isEmpty ? '' : _formatTotalDuration(),
-                        ),
-                      ),
-
-                      // ── Tombol aksi (Putar Semua + Shuffle) ──
-                      if (_songs.isNotEmpty)
                         SliverToBoxAdapter(
                           child: Padding(
-                            padding: EdgeInsets.fromLTRB(Layout.desktop(context) ? 28 : 16, 16, Layout.desktop(context) ? 28 : 16, 8),
-                            child: Row(
-                              children: [
-                                Expanded(
-                                  child: ElevatedButton.icon(
-                                    onPressed: _playAll,
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: AppColors.red,
-                                      foregroundColor: Colors.white,
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                      padding: const EdgeInsets.symmetric(vertical: 12),
+                            padding: EdgeInsets.fromLTRB(Layout.desktop(context) ? 28 : 20, 0, 20, 24),
+                            child: LayoutBuilder(
+                              builder: (context, constraints) {
+                                final isWide = constraints.maxWidth >= 600;
+                                final headerInfo = Column(
+                                  crossAxisAlignment: isWide ? CrossAxisAlignment.start : CrossAxisAlignment.center,
+                                  children: [
+                                    Text(
+                                      _name,
+                                      textAlign: isWide ? TextAlign.left : TextAlign.center,
+                                      style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w800),
                                     ),
-                                    icon: const Icon(Icons.play_arrow_rounded, size: 20),
-                                    label: const Text('Putar Semua', style: TextStyle(fontWeight: FontWeight.w600)),
-                                  ),
-                                ),
-                                const SizedBox(width: 10),
-                                GestureDetector(
-                                  onTap: () => setState(() => _shuffleMode = !_shuffleMode),
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                                    decoration: BoxDecoration(
-                                      color: _shuffleMode ? AppColors.red.withValues(alpha: 0.15) : AppColors.surface,
-                                      borderRadius: BorderRadius.circular(10),
-                                      border: Border.all(
-                                        color: _shuffleMode ? AppColors.red : AppColors.border,
-                                      ),
+                                    const SizedBox(height: 6),
+                                    Text(
+                                      _username.isNotEmpty
+                                          ? '$_username · ${_songs.length} lagu · ${_formatTotalDuration()}'
+                                          : '${_songs.length} lagu · ${_formatTotalDuration()}',
+                                      textAlign: isWide ? TextAlign.left : TextAlign.center,
+                                      style: const TextStyle(color: AppColors.textMuted, fontSize: 13),
                                     ),
-                                    child: Icon(
-                                      Icons.shuffle_rounded,
-                                      color: _shuffleMode ? AppColors.red : AppColors.textMuted,
-                                      size: 20,
+                                    const SizedBox(height: 16),
+                                    Row(
+                                      mainAxisAlignment: isWide ? MainAxisAlignment.start : MainAxisAlignment.center,
+                                      children: [
+                                        ElevatedButton.icon(
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor: AppColors.red,
+                                            foregroundColor: Colors.white,
+                                            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+                                          ),
+                                          onPressed: _songs.isEmpty ? null : _playAll,
+                                          icon: const Icon(Icons.play_arrow_rounded, size: 24),
+                                          label: const Text('Putar Semua', style: TextStyle(fontWeight: FontWeight.w700)),
+                                        ),
+                                        const SizedBox(width: 10),
+                                        IconButton.filledTonal(
+                                          style: IconButton.styleFrom(
+                                            backgroundColor: _shuffleMode ? AppColors.red : AppColors.surfaceAlt,
+                                            foregroundColor: Colors.white,
+                                          ),
+                                          icon: const Icon(Icons.shuffle_rounded, size: 20),
+                                          onPressed: () => setState(() => _shuffleMode = !_shuffleMode),
+                                        ),
+                                      ],
                                     ),
-                                  ),
-                                ),
-                              ],
+                                  ],
+                                );
+
+                                if (isWide) {
+                                  return Row(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      _PlaylistCoverLarge(songs: _songs),
+                                      const SizedBox(width: 24),
+                                      Expanded(child: headerInfo),
+                                    ],
+                                  );
+                                }
+
+                                return Column(
+                                  children: [
+                                    _PlaylistCoverLarge(songs: _songs),
+                                    const SizedBox(height: 16),
+                                    headerInfo,
+                                  ],
+                                );
+                              },
                             ),
                           ),
                         ),
-
-                      // ── Daftar lagu ──
-                      _songs.isEmpty
-                          ? const SliverToBoxAdapter(
-                              child: Padding(
-                                padding: EdgeInsets.only(top: 80),
-                                child: Center(
-                                  child: Text('Playlist ini masih kosong.',
-                                      style: TextStyle(color: AppColors.textMuted)),
-                                ),
-                              ),
-                            )
-                          : SliverPadding(
-                              padding: EdgeInsets.fromLTRB(Layout.desktop(context) ? 24 : 12, 8, Layout.desktop(context) ? 24 : 12, 100),
-                              sliver: SliverList(
-                                delegate: SliverChildBuilderDelegate(
-                                  (ctx, i) {
-                                    final s = _songs[i];
-                                    final isActive = player.current?.videoId == s.videoId;
-                                    return MusicCard(
-                                      layout: MusicCardLayout.list,
-                                      title: s.title,
-                                      artist: s.artist,
-                                      imageUrl: s.thumbnailUrl,
-                                      isActive: isActive,
-                                      isPlaying: isActive && player.isPlaying,
-                                      onRemove: () => _removeSong(s),
-                                      onTap: () {
-                                        if (isActive) {
-                                          player.togglePlaying();
-                                        } else {
-                                          _play(s);
-                                        }
-                                      },
-                                    );
-                                  },
-                                  childCount: _songs.length,
-                                ),
+                        if (_songs.isEmpty)
+                          const SliverToBoxAdapter(
+                            child: Padding(
+                              padding: EdgeInsets.all(40),
+                              child: Center(
+                                child: Text('Playlist ini masih kosong.', style: TextStyle(color: AppColors.textMuted)),
                               ),
                             ),
-                    ],
-                  ),
-      ),
+                          )
+                        else
+                          SliverPadding(
+                            padding: EdgeInsets.fromLTRB(Layout.desktop(context) ? 28 : 16, 0, 16, 120),
+                            sliver: SliverList(
+                              delegate: SliverChildBuilderDelegate(
+                                (ctx, i) {
+                                  final s = _songs[i];
+                                  final isCurrent = player.current?.videoId == s.videoId;
+                                  return Container(
+                                    margin: const EdgeInsets.only(bottom: 6),
+                                    decoration: BoxDecoration(
+                                      color: isCurrent ? AppColors.surfaceAlt : AppColors.surface,
+                                      borderRadius: BorderRadius.circular(10),
+                                      border: Border.all(
+                                        color: isCurrent ? AppColors.red.withOpacity(0.5) : AppColors.border,
+                                      ),
+                                    ),
+                                    child: ListTile(
+                                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                                      onTap: () => _play(s),
+                                      leading: ClipRRect(
+                                        borderRadius: BorderRadius.circular(6),
+                                        child: CachedNetworkImage(
+                                          imageUrl: s.thumbnailUrl,
+                                          width: 44,
+                                          height: 44,
+                                          fit: BoxFit.cover,
+                                          errorWidget: (_, __, ___) => Container(
+                                            width: 44,
+                                            height: 44,
+                                            color: AppColors.surfaceAlt,
+                                            child: const Icon(Icons.music_note, color: AppColors.border),
+                                          ),
+                                        ),
+                                      ),
+                                      title: Text(
+                                        s.title,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          color: isCurrent ? AppColors.red : Colors.white,
+                                          fontWeight: FontWeight.w600,
+                                          fontSize: 13,
+                                        ),
+                                      ),
+                                      subtitle: Text(
+                                        s.artist,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(color: AppColors.textMuted, fontSize: 11.5),
+                                      ),
+                                      trailing: IconButton(
+                                        icon: const Icon(Icons.remove_circle_outline, color: AppColors.textFaint, size: 20),
+                                        onPressed: () => _removeSong(s),
+                                      ),
+                                    ),
+                                  );
+                                },
+                                childCount: _songs.length,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+        ),
       ),
     );
   }
 }
 
-/// Hero header playlist — cover 2x2 grid besar, nama, username, info.
-class _PlaylistCompactHeader extends StatelessWidget {
-  final String name;
-  final String username;
+class _PlaylistCoverLarge extends StatelessWidget {
   final List<Song> songs;
-  final String totalDuration;
-
-  const _PlaylistCompactHeader({
-    required this.name,
-    required this.username,
-    required this.songs,
-    required this.totalDuration,
-  });
+  const _PlaylistCoverLarge({required this.songs});
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          // Cover kecil (1 gambar saja, bukan banner besar)
-          ClipRRect(
-            borderRadius: BorderRadius.circular(10),
-            child: SizedBox(
-              width: 64,
-              height: 64,
-              child: songs.isNotEmpty && songs.first.thumbnailUrl.isNotEmpty
-                  ? CachedNetworkImage(
-                      imageUrl: songs.first.thumbnailUrl,
-                      fit: BoxFit.cover,
-                      errorWidget: (_, __, ___) => Container(color: AppColors.surfaceAlt, child: const Icon(Icons.music_note, color: AppColors.border, size: 18)),
-                      placeholder: (_, __) => Container(color: AppColors.surfaceAlt),
-                    )
-                  : Container(color: AppColors.surfaceAlt, child: const Icon(Icons.music_note, color: AppColors.border, size: 18)),
-            ),
+    if (songs.isEmpty) {
+      return Container(
+        width: 140,
+        height: 140,
+        decoration: BoxDecoration(color: AppColors.surfaceAlt, borderRadius: BorderRadius.circular(14)),
+        child: const Icon(Icons.music_note, color: AppColors.border, size: 48),
+      );
+    }
+
+    final thumbs = songs.map((s) => s.thumbnailUrl).where((t) => t.isNotEmpty).take(4).toList();
+
+    if (thumbs.length == 1) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(14),
+        child: CachedNetworkImage(
+          imageUrl: thumbs[0],
+          width: 140,
+          height: 140,
+          fit: BoxFit.cover,
+          errorWidget: (_, __, ___) => Container(width: 140, height: 140, color: AppColors.surfaceAlt),
+        ),
+      );
+    }
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(14),
+      child: SizedBox(
+        width: 140,
+        height: 140,
+        child: GridView.builder(
+          physics: const NeverScrollableScrollPhysics(),
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 2,
+            crossAxisSpacing: 2,
+            mainAxisSpacing: 2,
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (username.isNotEmpty)
-                  Text(username, maxLines: 1, overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: AppColors.textMuted, fontSize: 12)),
-                const SizedBox(height: 2),
-                Row(children: [
-                  const Icon(Icons.library_music_outlined, color: AppColors.textFaint, size: 12),
-                  const SizedBox(width: 4),
-                  Text('${songs.length} lagu', style: const TextStyle(color: AppColors.textFaint, fontSize: 12)),
-                  if (totalDuration.isNotEmpty) ...[
-                    const SizedBox(width: 10),
-                    const Icon(Icons.access_time, color: AppColors.textFaint, size: 12),
-                    const SizedBox(width: 4),
-                    Text(totalDuration, style: const TextStyle(color: AppColors.textFaint, fontSize: 12)),
-                  ],
-                ]),
-              ],
-            ),
-          ),
-        ],
+          itemCount: 4,
+          itemBuilder: (ctx, i) {
+            if (i < thumbs.length) {
+              return CachedNetworkImage(
+                imageUrl: thumbs[i],
+                fit: BoxFit.cover,
+                errorWidget: (_, __, ___) => Container(color: AppColors.surfaceAlt),
+              );
+            }
+            return Container(color: AppColors.surfaceAlt);
+          },
+        ),
       ),
     );
   }

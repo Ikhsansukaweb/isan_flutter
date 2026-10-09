@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/song.dart';
 import '../state/device_id.dart';
 
@@ -125,56 +125,48 @@ Map<String, dynamic> petaDari(dynamic d) {
 class Api {
   static const String base = 'https://isanim.web.id';
 
-  static const _storage = FlutterSecureStorage();
   static const _kToken = 'isan_token';
   static const _kRefreshToken = 'isan_refresh_token';
 
   static String? _token;
   static String? _refreshToken;
 
-  // ── HTTPS: pakai validasi bawaan Dart ────────────────────────────────
-  //
-  // Sebelumnya di sini ada "SSL pinning" manual: membandingkan fingerprint
-  // SHA-256 sertifikat dengan daftar yang ditulis di kode. Cara itu DIBUANG
-  // karena 2 masalah nyata:
-  //
-  //   1. SecurityContext(withTrustedRoots: false) membuat Dart tidak bisa
-  //      menyusun rantai sertifikat sama sekali, sehingga koneksi gagal
-  //      sebelum fingerprint sempat dibandingkan.
-  //   2. Nama host yang diperiksa keras ('isanim.web.id' saja), padahal HP
-  //      bisa memakai variasi lain -> koneksi ditolak total.
-  //   3. Sertifikat Let's Encrypt hanya 90 hari. Setiap renewal, fingerprint
-  //      berubah, dan APK lama langsung tidak bisa konek sampai di-update.
-  //      Itu membuat aplikasi rapuh tanpa menambah keamanan berarti.
-  //
-  // Sekarang: percayakan pada validasi TLS bawaan (Android system CA store).
-  // Tetap terenkripsi penuh (TLS 1.2/1.3) dan terlindung dari sertifikat
-  // palsu, tapi tahan terhadap renewal dan tidak rapuh.
   static http.Client get _client => _httpClientBiasa;
-
   static final http.Client _httpClientBiasa = http.Client();
 
   static Future<void> init() async {
-    _token = await _storage.read(key: _kToken);
-    _refreshToken = await _storage.read(key: _kRefreshToken);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _token = prefs.getString(_kToken);
+      _refreshToken = prefs.getString(_kRefreshToken);
+    } catch (_) {
+      _token = null;
+      _refreshToken = null;
+    }
   }
 
   static String? get token => _token;
 
   static Future<void> setTokens({required String token, String? refreshToken}) async {
     _token = token;
-    await _storage.write(key: _kToken, value: token);
-    if (refreshToken != null) {
-      _refreshToken = refreshToken;
-      await _storage.write(key: _kRefreshToken, value: refreshToken);
-    }
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_kToken, token);
+      if (refreshToken != null) {
+        _refreshToken = refreshToken;
+        await prefs.setString(_kRefreshToken, refreshToken);
+      }
+    } catch (_) {}
   }
 
   static Future<void> clearToken() async {
     _token = null;
     _refreshToken = null;
-    await _storage.delete(key: _kToken);
-    await _storage.delete(key: _kRefreshToken);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_kToken);
+      await prefs.remove(_kRefreshToken);
+    } catch (_) {}
   }
 
   static String? _cachedAppVersion;
@@ -183,7 +175,11 @@ class Api {
     final h = <String, String>{};
     if (json) h['Content-Type'] = 'application/json';
     if (_token != null) h['Authorization'] = 'Bearer $_token';
-    h['X-Device-Id'] = await DeviceId.get();
+    try {
+      h['X-Device-Id'] = await DeviceId.get();
+    } catch (_) {
+      h['X-Device-Id'] = 'desktop-linux';
+    }
     // WAJIB dikirim -- backend nge-block request mobile yang gak punya
     // header ini sama sekali (itu cara nge-block app versi LAMA yang
     // sudah beredar publik sebelum sistem versioning ini ada, lihat

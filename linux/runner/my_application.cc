@@ -6,7 +6,6 @@
 #endif
 
 #include "flutter/generated_plugin_registrant.h"
-#include <webview_cef/webview_cef_plugin.h>
 
 struct _MyApplication {
   GtkApplication parent_instance;
@@ -33,25 +32,9 @@ static void my_application_activate(GApplication* application) {
   // in case the window manager does more exotic layout, e.g. tiling.
   // If running on Wayland assume the header bar will work (may need changing
   // if future cases occur).
-  gboolean use_header_bar = TRUE;
-#ifdef GDK_WINDOWING_X11
-  GdkScreen* screen = gtk_window_get_screen(window);
-  if (GDK_IS_X11_SCREEN(screen)) {
-    const gchar* wm_name = gdk_x11_screen_get_window_manager_name(screen);
-    if (g_strcmp0(wm_name, "GNOME Shell") != 0) {
-      use_header_bar = FALSE;
-    }
-  }
-#endif
-  if (use_header_bar) {
-    GtkHeaderBar* header_bar = GTK_HEADER_BAR(gtk_header_bar_new());
-    gtk_widget_show(GTK_WIDGET(header_bar));
-    gtk_header_bar_set_title(header_bar, "isan_flutter");
-    gtk_header_bar_set_show_close_button(header_bar, TRUE);
-    gtk_window_set_titlebar(window, GTK_WIDGET(header_bar));
-  } else {
-    gtk_window_set_title(window, "isan_flutter");
-  }
+  // Hyprland / Tiling WM: Hilangkan headerbar dan window decorations
+  gtk_window_set_decorated(window, FALSE);
+  gtk_window_set_title(window, "isan_flutter");
 
   gtk_window_set_default_size(window, 1280, 720);
 
@@ -60,8 +43,6 @@ static void my_application_activate(GApplication* application) {
       project, self->dart_entrypoint_arguments);
 
   FlView* view = fl_view_new(project);
-  g_signal_connect(view, "key_press_event", G_CALLBACK(processKeyEventForCEF), nullptr);
-  g_signal_connect(view, "key_release_event", G_CALLBACK(processKeyEventForCEF), nullptr);
   GdkRGBA background_color;
   // Background defaults to black, override it here if necessary, e.g. #00000000
   // for transparent.

@@ -29,7 +29,6 @@ dependencies:
   google_fonts: ^6.2.1
   # dipakai untuk SSL pinning (SHA-256 sertifikat) di lib/api/api_client.dart
   crypto: ^3.0.6
-  webview_cef: ^0.6.2
 
 dev_dependencies:
   flutter_test:

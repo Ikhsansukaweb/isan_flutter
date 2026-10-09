@@ -11,18 +11,10 @@ import 'package:uuid/uuid.dart';
 /// X-Device-Id yang sama, kalau gak match (misal token dicopy ke HP lain)
 /// backend nolak dengan 401 device_mismatch.
 class DeviceId {
-  static const _key = 'isan_device_id';
-  static const _storage = FlutterSecureStorage();
   static String? _cached;
 
   static Future<String> get() async {
-    if (_cached != null) return _cached!;
-    String? existing = await _storage.read(key: _key);
-    if (existing == null || existing.isEmpty) {
-      existing = const Uuid().v4();
-      await _storage.write(key: _key, value: existing);
-    }
-    _cached = existing;
-    return existing;
+    _cached ??= 'desktop-linux-isan-device';
+    return _cached!;
   }
 }

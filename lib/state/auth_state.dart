@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../api/api_client.dart';
 import '../models/song.dart';
 
@@ -9,7 +9,6 @@ import '../models/song.dart';
 /// tapi tetap baik dipisah dari shared_preferences biasa supaya gak ikut
 /// adb backup bersama data lain.
 class AuthState extends ChangeNotifier {
-  static const _storage = FlutterSecureStorage();
   static const _kUser = 'isan_user';
 
   IsanUser? user;
@@ -17,29 +16,36 @@ class AuthState extends ChangeNotifier {
 
   Future<void> loadFromStorage() async {
     await Api.init();
-    final userStr = await _storage.read(key: _kUser);
-    if (Api.token != null && userStr != null) {
-      try {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final userStr = prefs.getString(_kUser);
+      if (Api.token != null && userStr != null) {
         user = IsanUser.fromJson(jsonDecode(userStr));
-      } catch (_) {}
-    }
+      }
+    } catch (_) {}
     loaded = true;
     notifyListeners();
   }
 
   Future<void> setAuth(IsanUser u, String token, {String? refreshToken}) async {
     await Api.setTokens(token: token, refreshToken: refreshToken);
-    await _storage.write(key: _kUser, value: jsonEncode(u.toJson()));
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_kUser, jsonEncode(u.toJson()));
+    } catch (_) {}
     user = u;
     notifyListeners();
   }
 
   Future<void> logout() async {
     try {
-      await Api.logout(); // clear cookie/refresh token record di backend juga
+      await Api.logout();
     } catch (_) {}
     await Api.clearToken();
-    await _storage.delete(key: _kUser);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_kUser);
+    } catch (_) {}
     user = null;
     notifyListeners();
   }

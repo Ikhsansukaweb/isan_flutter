@@ -1,8 +1,10 @@
+import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/song.dart';
 import '../state/music_player_state.dart';
 import '../state/playback_native.dart';
+import '../state/linux_audio_backend.dart';
 import '../theme.dart';
 import 'isan_background_webview.dart';
 
@@ -98,7 +100,8 @@ class _MiniPlayerState extends State<MiniPlayer> {
         'controls': 0,
         'enablejsapi': 1,
         'origin': '$_webBase',
-        'widget_refer': '$_webBase'
+        'widget_referrer': '$_webBase',
+        'host': 'https://www.youtube.com'
       },
       events: {
         'onReady': function(event) {
@@ -157,33 +160,60 @@ class _MiniPlayerState extends State<MiniPlayer> {
 
   void _syncWithState(MusicPlayerState player) {
     final song = player.current;
-    if (song == null || !_playerReady) return;
+    if (song == null) {
+      if (Platform.isLinux) {
+        LinuxAudioBackend.stop();
+      }
+      return;
+    }
+
+    if (!player.isPlaying) {
+      if (Platform.isLinux) {
+        LinuxAudioBackend.pause();
+      } else if (_playerReady) {
+        _controller.runJs('isanPause();');
+      }
+      return;
+    }
 
     if (_loadedVideoId != song.videoId || _loadedToken != player.reloadToken) {
       _loadedVideoId = song.videoId;
       _loadedToken = player.reloadToken;
-      // ignore: avoid_print
       print('[ISAN MUSIC] Dart calling isanLoad with videoId="${song.videoId}" (title="${song.title}")');
-      _controller.runJs("isanLoad('${song.videoId}');");
-      if (!_nativeStarted) {
+
+      if (Platform.isLinux) {
+        LinuxAudioBackend.play(song.videoId, onEnded: () {
+          _player?.next();
+        });
+      } else if (_playerReady) {
+        _controller.runJs("isanLoad('${song.videoId}');");
+      }
+
+      if (!_nativeStarted && !Platform.isLinux) {
         _nativeStarted = true;
         PlaybackNative.start();
         PlaybackNative.setActionHandler(_onNotifAction);
       }
-      PlaybackNative.update(
-        title: song.title,
-        subtitle: song.artist,
-        isPlaying: true,
-        artworkUrl: song.thumbnailUrl,
-      );
+      if (!Platform.isLinux) {
+        PlaybackNative.update(
+          title: song.title,
+          subtitle: song.artist,
+          isPlaying: true,
+          artworkUrl: song.thumbnailUrl,
+        );
+      }
     } else {
-      _controller.runJs(player.isPlaying ? 'isanPlay();' : 'isanPause();');
-      PlaybackNative.update(
-        title: song.title,
-        subtitle: song.artist,
-        isPlaying: player.isPlaying,
-        artworkUrl: song.thumbnailUrl,
-      );
+      if (Platform.isLinux) {
+        LinuxAudioBackend.play(song.videoId, onEnded: () => _player?.next());
+      } else if (_playerReady) {
+        _controller.runJs('isanPlay();');
+        PlaybackNative.update(
+          title: song.title,
+          subtitle: song.artist,
+          isPlaying: true,
+          artworkUrl: song.thumbnailUrl,
+        );
+      }
     }
   }
 

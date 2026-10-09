@@ -39,7 +39,7 @@ class AnimasiIntroIsan extends StatefulWidget {
 }
 
 class _AnimasiIntroIsanState extends State<AnimasiIntroIsan>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   late final AnimationController _kendali;
   late final Ticker _ticker;
   DateTime? _mulai;

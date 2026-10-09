@@ -1,10 +1,6 @@
+library diag_intro;
+
 import 'package:flutter/material.dart';
-
-/// Diagnosa: menampilkan canvas intro TANPA lapisan sapuan lensa,
-/// untuk membuktikan apakah sapuan itu sumber warna kuning.
-/// Dibuka lewat: lib/diag_intro.dart
-library;
-
 import 'widgets/animasi_intro_isan.dart';
 
 void main() => runApp(const MaterialApp(
